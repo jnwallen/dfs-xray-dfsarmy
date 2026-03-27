@@ -5,7 +5,7 @@ import plotly.express as px
 import re
 from io import StringIO
 
-st.set_page_config(page_title="DFS X-Ray Full", layout="wide")
+st.set_page_config(page_title="DFS X-Ray", layout="wide")
 
 # ====================== HEADER WITH BOTH LOGOS ======================
 col_l, col_c, col_r = st.columns([1, 3, 1])
@@ -114,9 +114,9 @@ if lineups_df is not None:
 
 tabs = st.tabs(tab_list)
 
-# Research Tabs (0-5)
 with tabs[0]:
     st.subheader("🔥 Hot Glance")
+    st.caption("Quick visual of the top 10 players. Green badges highlight strong areas.")
     top = research_df.nlargest(10, "Value_per_k")
     c = st.columns(5)
     for i, (_, p) in enumerate(top.iterrows()):
@@ -136,44 +136,54 @@ with tabs[0]:
                     st.markdown(f"<span style='color:#44FF88'>{b}</span>", unsafe_allow_html=True)
 
 with tabs[1]:
-    st.subheader("Value Plays")
+    st.subheader("📊 Value Plays")
+    st.caption("**Chalk Value** = high ownership + strong value (popular plays)\n**Sneaky Value** = lower ownership + strong value (potential edge)")
     chalk = research_df[research_df["Ownership"] >= 20].nlargest(12, "Value_per_k")
-    st.write("**Chalk Value**")
+    st.write("**Chalk Value Plays**")
     st.dataframe(chalk[["Name", "Team", "Proj", "Value_per_k", "Ownership", "Salary"]], width="stretch")
     sneaky = research_df[research_df["Ownership"] < 20].nlargest(12, "Value_per_k")
-    st.write("**Sneaky Value**")
+    st.write("**Sneaky Value Plays**")
     st.dataframe(sneaky[["Name", "Team", "Proj", "Value_per_k", "Ownership", "Salary"]], width="stretch")
 
 with tabs[2]:
-    st.subheader("Consistency & Recent Form + GPP")
-    fig = px.scatter(research_df, x="5gFP", y="Proj", color="Ownership", size="Value_per_k", hover_name="Name")
+    st.subheader("📈 Consistency & Recent Form + GPP")
+    st.caption("Look for players with strong recent 5-game form and good projected value.")
+    fig = px.scatter(research_df, x="5gFP", y="Proj", color="Ownership", size="Value_per_k", hover_name="Name",
+                     title="Recent 5-Game FP vs Projection")
     st.plotly_chart(fig, use_container_width=True)
     st.dataframe(research_df.nlargest(12, "5gFP")[["Name", "Team", "Proj", "Value_per_k", "Ownership", "5gFP"]], width="stretch")
+
     st.subheader("GPP Insights")
-    st.dataframe(research_df.nlargest(12, "Proj Diff")[["Name", "Team", "Proj", "GPP Target", "7x%", "Proj Diff", "Ownership"]], width="stretch")
+    st.caption("**GPP Target** = points needed to win big tournaments\n**7x%** = how often they need to go nuclear\n**Proj Diff** = Projection vs GPP Target (positive = good)")
+    gpp = research_df.nlargest(12, "Proj Diff")[["Name", "Team", "Proj", "GPP Target", "7x%", "Proj Diff", "Ownership"]]
+    st.dataframe(gpp, width="stretch")
 
 with tabs[3]:
     st.subheader("⏱️ Minutes & Usage")
-    st.dataframe(research_df.nlargest(12, "Points_per_min")[["Name", "Team", "Minutes", "Points_per_min", "Proj"]], width="stretch")
+    st.caption("**Points per Minute** = scoring efficiency when on the floor.\n**Min_Trend** = Projected minutes - 5-game average (positive = expected to play more).")
+    st.dataframe(research_df.nlargest(12, "Points_per_min")[["Name", "Team", "Minutes", "Points_per_min", "Proj", "Ownership"]], width="stretch")
     st.dataframe(research_df.nlargest(12, "Minutes")[["Name", "Team", "Minutes", "5gMin", "Min_Trend"]], width="stretch")
 
 with tabs[4]:
-    st.subheader("Recommended Core Stacks")
+    st.subheader("🔀 Recommended Core Stacks")
+    st.caption("Teams with the most players in the top 10 ownership — your preferred 3-stack candidates.")
     top_owned = research_df.nlargest(10, "Ownership")
     team_counts = top_owned["Team"].value_counts().head(4)
     for team, count in team_counts.items():
         players = top_owned[top_owned["Team"] == team]["Name"].tolist()
         st.write(f"**{team}** — {count} players in top 10 ownership")
         st.write(" → " + ", ".join(players[:8]))
+        st.write("---")
 
 with tabs[5]:
     st.subheader("⚡ Vegas & Pace Highlights")
+    st.markdown("**Total O/U** = Expected total points in the game (higher = more fantasy points likely).\n**Pace** = How fast the game is expected to be played (higher = more possessions).")
     games = research_df[['Team', 'Opp', 'Total O/U']].drop_duplicates().sort_values('Total O/U', ascending=False)
     st.dataframe(games.head(6), width="stretch")
     pace_teams = research_df[['Team', 'Pace Team']].drop_duplicates().sort_values('Pace Team', ascending=False).head(8)
     st.dataframe(pace_teams, width="stretch")
 
-# ====================== FULL X-RAY TAB ======================
+# ====================== FULL X-RAY ======================
 if lineups_df is not None:
     with tabs[6]:
         st.subheader("📋 Lineup X-Ray")
@@ -188,20 +198,13 @@ if lineups_df is not None:
         st.subheader("Exposures")
         st.dataframe(exp_df, width="stretch")
 
-        # Lineup Cards (fixed layout)
+        # Lineup Cards
         st.subheader("Lineup Cards")
         lineup_num = st.selectbox("Select Lineup", range(len(lineups_df)))
         row = lineups_df.iloc[lineup_num]
 
-        teams = []
-        for pos in pos_cols:
-            name_col = f"{pos}_Name"
-            if name_col in row and pd.notna(row[name_col]):
-                clean = row[name_col].lower()
-                team = name_to_team.get(clean, "UNK")
-                if team != "UNK":
-                    teams.append(team)
-        stack_counter = Counter(teams)
+        teams = [name_to_team.get(row[f"{pos}_Name"].lower(), "UNK") for pos in pos_cols if f"{pos}_Name" in row and pd.notna(row[f"{pos}_Name"])]
+        stack_counter = Counter([t for t in teams if t != "UNK"])
         stack_label = " • ".join([f"{team} {cnt}" for team, cnt in sorted(stack_counter.items(), key=lambda x: -x[1])])
         st.markdown(f"**Stack:** {stack_label}")
 
@@ -234,7 +237,6 @@ if lineups_df is not None:
                 display_name = name_to_info[clean_name]["Display"]
                 info = name_to_info[clean_name]
 
-                # Count lineups player is in
                 mask = pd.Series(False, index=lineups_df.index)
                 for pos in pos_cols:
                     col = f"{pos}_Name"
@@ -244,7 +246,6 @@ if lineups_df is not None:
 
                 st.success(f"**{display_name}** — In **{lineup_count}** lineups | Proj {info['Projection']:.1f} | Value/k {info['Value_per_k']:.2f} | Own {info['Ownership']:.1f}%")
 
-                # Most common teammates
                 st.subheader("Most Common Teammates")
                 teammate_lineups = lineups_df[mask]
                 teammates = []
@@ -286,4 +287,4 @@ if lineups_df is not None:
             stack_series = pd.Series(stack_labels)
             st.bar_chart(stack_series.value_counts().head(15))
 
-st.caption("DFS X-Ray Full v1.1 — Complete with teammate drill-down")
+st.caption("DFS X-Ray Full v1.1 — All descriptions restored")
