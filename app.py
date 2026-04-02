@@ -4,10 +4,11 @@ from collections import Counter
 import plotly.express as px
 import re
 from io import StringIO
+import urllib.parse
 
 st.set_page_config(page_title="DFS X-Ray", layout="wide")
 
-# ====================== HEADER WITH BOTH LOGOS ======================
+# ====================== HEADER ======================
 col_l, col_c, col_r = st.columns([1, 3, 1])
 with col_l:
     try:
@@ -37,24 +38,32 @@ if not research_file:
 @st.cache_data
 def load_research(file):
     df = pd.read_csv(file, header=1)
+
     def clean_num(val):
-        if pd.isna(val): return 0.0
+        if pd.isna(val):
+            return 0.0
         s = str(val).replace('$', '').replace(',', '').replace('%', '').strip()
-        try: return float(s)
-        except: return 0.0
+        try:
+            return float(s)
+        except:
+            return 0.0
 
     df["Salary"] = df["Salary"].apply(clean_num)
     df["Ownership"] = df["Ownership"].apply(clean_num)
     df["Proj"] = df["Proj"].apply(clean_num)
-    df["Value"] = df["Value"].apply(clean_num)
-    df["GPP Target"] = df.get("GPP Target", pd.Series([0]*len(df))).apply(clean_num)
-    df["7x%"] = df.get("7x%", pd.Series([0]*len(df))).apply(clean_num)
-    df["Proj Diff"] = df.get("Proj Diff", pd.Series([0]*len(df))).apply(clean_num)
+    df["GPP Target"] = df.get("GPP Target", pd.Series([0] * len(df))).apply(clean_num)
+    df["Proj Diff"] = df.get("Proj Diff", pd.Series([0] * len(df))).apply(clean_num)
+    df["Dvp"] = df["Dvp"].apply(clean_num)
+    df["Rest"] = df.get("Rest", pd.Series([0] * len(df))).apply(clean_num).astype(int)
+    df["DFSA Grade"] = df.get("DFSA Grade", pd.Series([0] * len(df))).apply(clean_num)
+    df["Pace (+/-)"] = df.get("Pace (+/-)", pd.Series([0] * len(df))).apply(clean_num)
+    df["Ceiling"] = df.get("Ceiling", pd.Series([0] * len(df))).apply(clean_num)
+    df["USG%"] = df.get("USG%", pd.Series([0] * len(df))).apply(clean_num)
 
     df["Team"] = df["Team"].astype(str).str.upper().str.strip()
     df["Value_per_k"] = (df["Proj"] / (df["Salary"] / 1000)).round(2)
     df["Points_per_min"] = (df["Proj"] / df["Minutes"]).round(2) if "Minutes" in df.columns and df["Minutes"].max() > 0 else 0.0
-    df["Min_Trend"] = df.get("Minutes", 0) - df.get("5gMin", 0)
+    df["Min_Trend"] = df.get("Minutes", pd.Series([0] * len(df))) - df.get("5gMin", pd.Series([0] * len(df)))
 
     return df
 
@@ -107,88 +116,224 @@ if lineups_file:
 else:
     st.success(f"Research: **{len(research_df)}** players (Upload lineups for full X-Ray)")
 
+# ====================== CLICKABLE LINK HELPERS ======================
+team_url_map = {
+    "ATL": "https://www.espn.com/nba/team/_/name/atl/atlanta-hawks",
+    "BOS": "https://www.espn.com/nba/team/_/name/bos/boston-celtics",
+    "BKN": "https://www.espn.com/nba/team/_/name/bkn/brooklyn-nets",
+    "CHA": "https://www.espn.com/nba/team/_/name/cha/charlotte-hornets",
+    "CHI": "https://www.espn.com/nba/team/_/name/chi/chicago-bulls",
+    "CLE": "https://www.espn.com/nba/team/_/name/cle/cleveland-cavaliers",
+    "DAL": "https://www.espn.com/nba/team/_/name/dal/dallas-mavericks",
+    "DEN": "https://www.espn.com/nba/team/_/name/den/denver-nuggets",
+    "DET": "https://www.espn.com/nba/team/_/name/det/detroit-pistons",
+    "GS": "https://www.espn.com/nba/team/_/name/gs/golden-state-warriors",
+    "HOU": "https://www.espn.com/nba/team/_/name/hou/houston-rockets",
+    "IND": "https://www.espn.com/nba/team/_/name/ind/indiana-pacers",
+    "LAC": "https://www.espn.com/nba/team/_/name/lac/la-clippers",
+    "LAL": "https://www.espn.com/nba/team/_/name/lal/los-angeles-lakers",
+    "MEM": "https://www.espn.com/nba/team/_/name/mem/memphis-grizzlies",
+    "MIA": "https://www.espn.com/nba/team/_/name/mia/miami-heat",
+    "MIL": "https://www.espn.com/nba/team/_/name/mil/milwaukee-bucks",
+    "MIN": "https://www.espn.com/nba/team/_/name/min/minnesota-timberwolves",
+    "NO": "https://www.espn.com/nba/team/_/name/no/new-orleans-pelicans",
+    "NYK": "https://www.espn.com/nba/team/_/name/nyk/new-york-knicks",
+    "OKC": "https://www.espn.com/nba/team/_/name/okc/oklahoma-city-thunder",
+    "ORL": "https://www.espn.com/nba/team/_/name/orl/orlando-magic",
+    "PHI": "https://www.espn.com/nba/team/_/name/phi/philadelphia-76ers",
+    "PHO": "https://www.espn.com/nba/team/_/name/phx/phoenix-suns",
+    "POR": "https://www.espn.com/nba/team/_/name/por/portland-trail-blazers",
+    "SAC": "https://www.espn.com/nba/team/_/name/sac/sacramento-kings",
+    "SA": "https://www.espn.com/nba/team/_/name/sa/san-antonio-spurs",
+    "TOR": "https://www.espn.com/nba/team/_/name/tor/toronto-raptors",
+    "UTA": "https://www.espn.com/nba/team/_/name/uta/utah-jazz",
+    "WAS": "https://www.espn.com/nba/team/_/name/was/washington-wizards",
+}
+
+def clickable_name(name):
+    url = f"https://www.espn.com/search/_/q/{urllib.parse.quote(name)}"
+    return f'<a href="{url}" target="_blank">{name}</a>'
+
+def clickable_team(team):
+    url = team_url_map.get(team, "#")
+    return f'<a href="{url}" target="_blank">{team}</a>'
+
 # ====================== TABS ======================
-tab_list = ["🔥 Hot Glance", "📊 Value Plays", "📈 Consistency", "⏱️ Minutes", "🔀 Stacks", "⚡ Vegas & Pace"]
+tab_list = ["🔥 Hot Glance", "9K Studs", "🔀 Stacks", "⏱️ Minutes", "📈 Consistency", "⚡ Vegas & Pace"]
 if lineups_df is not None:
     tab_list.append("📋 Lineup X-Ray")
 
 tabs = st.tabs(tab_list)
 
+# ====================== 1. HOT GLANCE ======================
 with tabs[0]:
     st.subheader("🔥 Hot Glance")
-    st.caption("Quick visual of the top 10 players. Green badges highlight strong areas.")
-    top = research_df.nlargest(10, "Value_per_k")
+    st.caption("Top 15 by Value/k • Stricter rules: Pure Value ≥ 5.75 | Multi-badge ≥ 5.25 + new edges")
+
+    with st.expander("📌 Badge Legend – What each badge means & how it's calculated"):
+        st.markdown("""
+        - **🔥 High Value**: Value/k ≥ 5.0 (Proj ÷ (Salary/1000))  
+        - **⏱️ Strong Min**: Projected minutes ≥ 30  
+        - **📈 Hot Form**: 5-game FP > 90% of today's Proj  
+        - **🎯 GPP Edge**: Proj > GPP Target (Proj Diff > 0)  
+
+        **New edges**  
+        - **🛡️ Dream Matchup**: Dvp ≤ -5.0%  
+        - **⚡ Pace Booster**: Pace (+/-) ≥ +2.0  
+        - **🛌 Fresh Legs**: Rest ≥ 3 days  
+        - **💎 Elite DFSA**: DFSA Grade ≥ 70
+        """)
+
+    def get_badges(row):
+        badges = []
+        if row['Value_per_k'] >= 5.0: badges.append("🔥 High Value")
+        if row.get("Minutes", 0) >= 30: badges.append("⏱️ Strong Min")
+        if row.get("5gFP", 0) > row['Proj'] * 0.9: badges.append("📈 Hot Form")
+        if row.get("Proj Diff", 0) > 0: badges.append("🎯 GPP Edge")
+        if row.get("Dvp", 0) <= -5.0: badges.append("🛡️ Dream Matchup")
+        if row.get("Pace (+/-)", 0) >= 2.0: badges.append("⚡ Pace Booster")
+        if row.get("Rest", 0) >= 3: badges.append("🛌 Fresh Legs")
+        if row.get("DFSA Grade", 0) >= 70: badges.append("💎 Elite DFSA")
+        return badges
+
+    research_df["badges"] = research_df.apply(get_badges, axis=1)
+    research_df["badge_count"] = research_df["badges"].apply(len)
+
+    mask = (
+        (research_df["Value_per_k"] >= 5.75) |
+        ((research_df["Value_per_k"] >= 5.25) & (research_df["badge_count"] > 1))
+    )
+    top = research_df[mask].nlargest(15, "Value_per_k")
+
     c = st.columns(5)
     for i, (_, p) in enumerate(top.iterrows()):
         with c[i % 5]:
             with st.container(border=True):
-                st.markdown(f"**{p['Name']}**")
-                st.caption(f"{p['Team']}")
+                st.markdown(f"**{clickable_name(p['Name'])}**", unsafe_allow_html=True)
+                st.markdown(f"{clickable_team(p['Team'])} vs {p['Opp']}", unsafe_allow_html=True)
                 st.metric("Proj", f"{p['Proj']:.1f}")
                 st.metric("Value/k", f"{p['Value_per_k']:.2f}")
                 st.metric("Own", f"{p['Ownership']:.1f}%")
+                for b in p["badges"]:
+                    st.markdown(f"<span style='color:#44FF88'>{b}</span>", unsafe_allow_html=True)
+
+# ====================== 2. 9K STUDS ======================
+with tabs[1]:
+    st.subheader("9K Studs")
+    st.caption("All players with Salary ≥ $9000 • Click player or team name for ESPN stats")
+
+    with st.expander("📌 Badge Legend – What each badge means & how it's calculated"):
+        st.markdown("""
+        - **🔥 High Value**: Value/k ≥ 5.0 (Proj ÷ (Salary/1000))  
+        - **⏱️ Strong Min**: Projected minutes ≥ 32  
+        - **📈 Hot Form**: 5-game FP > 90% of today's Proj  
+        - **🎯 GPP Edge**: Proj > GPP Target (Proj Diff > 0)  
+
+        **New edges**  
+        - **🛡️ Dream Matchup**: Dvp ≤ -5.0%  
+        - **⚡ Pace Booster**: Pace (+/-) ≥ +2.0  
+        - **🛌 Fresh Legs**: Rest ≥ 3 days  
+        - **💎 Elite DFSA**: DFSA Grade ≥ 70
+        """)
+
+    studs = research_df[research_df["Salary"] >= 9000].copy()
+
+    sort_options = {
+        "Projection (high to low)": "Proj",
+        "Value/k": "Value_per_k",
+        "Ceiling": "Ceiling",
+        "Ownership %": "Ownership",
+        "USG%": "USG%",
+    }
+    sort_by = st.selectbox("Sort cards by", options=list(sort_options.keys()), index=0)
+    studs = studs.sort_values(sort_options[sort_by], ascending=False)
+
+    cols = st.columns(3)
+    for i, (_, p) in enumerate(studs.iterrows()):
+        with cols[i % 3]:
+            with st.container(border=True):
+                st.markdown(f"**{clickable_name(p['Name'])}**", unsafe_allow_html=True)
+                st.markdown(f"{clickable_team(p['Team'])} vs {p['Opp']}", unsafe_allow_html=True)
+                st.metric("Proj", f"{p['Proj']:.1f}")
+                st.metric("Value/k", f"{p['Value_per_k']:.2f}")
+                st.metric("Own", f"{p['Ownership']:.1f}%")
+                st.caption(f"Dvp: {p.get('Dvp', 0):.1f}%")
+
                 badges = []
                 if p['Value_per_k'] >= 5.0: badges.append("🔥 High Value")
-                if p.get("Minutes", 0) >= 30: badges.append("⏱️ Strong Min")
+                if p.get("Minutes", 0) >= 32: badges.append("⏱️ Strong Min")
                 if p.get("5gFP", 0) > p['Proj'] * 0.9: badges.append("📈 Hot Form")
                 if p.get("Proj Diff", 0) > 0: badges.append("🎯 GPP Edge")
+                if p.get("Dvp", 0) <= -5.0: badges.append("🛡️ Dream Matchup")
+                if p.get("Pace (+/-)", 0) >= 2.0: badges.append("⚡ Pace Booster")
+                if p.get("Rest", 0) >= 3: badges.append("🛌 Fresh Legs")
+                if p.get("DFSA Grade", 0) >= 70: badges.append("💎 Elite DFSA")
+
                 for b in badges:
                     st.markdown(f"<span style='color:#44FF88'>{b}</span>", unsafe_allow_html=True)
 
-with tabs[1]:
-    st.subheader("📊 Value Plays")
-    st.caption("**Chalk Value** = high ownership + strong value (popular plays)\n**Sneaky Value** = lower ownership + strong value (potential edge)")
-    chalk = research_df[research_df["Ownership"] >= 20].nlargest(12, "Value_per_k")
-    st.write("**Chalk Value Plays**")
-    st.dataframe(chalk[["Name", "Team", "Proj", "Value_per_k", "Ownership", "Salary"]], width="stretch")
-    sneaky = research_df[research_df["Ownership"] < 20].nlargest(12, "Value_per_k")
-    st.write("**Sneaky Value Plays**")
-    st.dataframe(sneaky[["Name", "Team", "Proj", "Value_per_k", "Ownership", "Salary"]], width="stretch")
-
+# ====================== 3. STACKS ======================
 with tabs[2]:
+    st.subheader("🔀 Recommended Core Stacks")
+    st.caption("**Smart logic**:\n1. Most players in top 10 ownership\n2. Tie → highest game total\n3. Head-to-head → favorite")
+
+    top_owned = research_df.nlargest(10, "Ownership")
+    team_stats = top_owned.groupby("Team").agg(
+        Player_Count=("Name", "count"),
+        Game_Total=("Total O/U", "first"),
+        Team_Total=("Team Total", "first"),
+        Opp=("Opp", "first")
+    ).reset_index()
+
+    team_stats = team_stats.sort_values(
+        by=["Player_Count", "Game_Total", "Team_Total"],
+        ascending=[False, False, False]
+    )
+
+    for _, row in team_stats.head(4).iterrows():
+        team = row["Team"]
+        count = int(row["Player_Count"])
+        players = top_owned[top_owned["Team"] == team]["Name"].tolist()
+
+        if _ == 0:
+            st.markdown(f"**#1 Recommended 3-Stack → {clickable_team(team)}** ({count} players in top 10 owned)", unsafe_allow_html=True)
+        else:
+            st.markdown(f"**{clickable_team(team)}** — {count} players in top 10 ownership", unsafe_allow_html=True)
+
+        clickable_players = [clickable_name(p) for p in players[:8]]
+        st.write(" → " + ", ".join(clickable_players), unsafe_allow_html=True)
+        st.write("---")
+
+# ====================== 4. MINUTES ======================
+with tabs[3]:
+    st.subheader("⏱️ Minutes & Usage")
+    st.caption("**Points per Minute** = scoring efficiency when on the floor.\n**Min_Trend** = Projected minutes - 5-game average.")
+    st.dataframe(research_df.nlargest(12, "Points_per_min")[["Name", "Team", "Minutes", "Points_per_min", "Proj", "Ownership"]], width="stretch")
+    st.dataframe(research_df.nlargest(12, "Minutes")[["Name", "Team", "Minutes", "5gMin", "Min_Trend"]], width="stretch")
+
+# ====================== 5. CONSISTENCY ======================
+with tabs[4]:
     st.subheader("📈 Consistency & Recent Form + GPP")
-    st.caption("Look for players with strong recent 5-game form and good projected value.")
-    fig = px.scatter(research_df, x="5gFP", y="Proj", color="Ownership", size="Value_per_k", hover_name="Name",
-                     title="Recent 5-Game FP vs Projection")
+    fig = px.scatter(research_df, x="5gFP", y="Proj", color="Ownership", size="Value_per_k", hover_name="Name")
     st.plotly_chart(fig, use_container_width=True)
     st.dataframe(research_df.nlargest(12, "5gFP")[["Name", "Team", "Proj", "Value_per_k", "Ownership", "5gFP"]], width="stretch")
 
     st.subheader("GPP Insights")
-    st.caption("**GPP Target** = points needed to win big tournaments\n**7x%** = how often they need to go nuclear\n**Proj Diff** = Projection vs GPP Target (positive = good)")
     gpp = research_df.nlargest(12, "Proj Diff")[["Name", "Team", "Proj", "GPP Target", "7x%", "Proj Diff", "Ownership"]]
     st.dataframe(gpp, width="stretch")
 
-with tabs[3]:
-    st.subheader("⏱️ Minutes & Usage")
-    st.caption("**Points per Minute** = scoring efficiency when on the floor.\n**Min_Trend** = Projected minutes - 5-game average (positive = expected to play more).")
-    st.dataframe(research_df.nlargest(12, "Points_per_min")[["Name", "Team", "Minutes", "Points_per_min", "Proj", "Ownership"]], width="stretch")
-    st.dataframe(research_df.nlargest(12, "Minutes")[["Name", "Team", "Minutes", "5gMin", "Min_Trend"]], width="stretch")
-
-with tabs[4]:
-    st.subheader("🔀 Recommended Core Stacks")
-    st.caption("Teams with the most players in the top 10 ownership — your preferred 3-stack candidates.")
-    top_owned = research_df.nlargest(10, "Ownership")
-    team_counts = top_owned["Team"].value_counts().head(4)
-    for team, count in team_counts.items():
-        players = top_owned[top_owned["Team"] == team]["Name"].tolist()
-        st.write(f"**{team}** — {count} players in top 10 ownership")
-        st.write(" → " + ", ".join(players[:8]))
-        st.write("---")
-
+# ====================== 6. VEGAS & PACE ======================
 with tabs[5]:
     st.subheader("⚡ Vegas & Pace Highlights")
-    st.markdown("**Total O/U** = Expected total points in the game (higher = more fantasy points likely).\n**Pace** = How fast the game is expected to be played (higher = more possessions).")
     games = research_df[['Team', 'Opp', 'Total O/U']].drop_duplicates().sort_values('Total O/U', ascending=False)
     st.dataframe(games.head(6), width="stretch")
     pace_teams = research_df[['Team', 'Pace Team']].drop_duplicates().sort_values('Pace Team', ascending=False).head(8)
     st.dataframe(pace_teams, width="stretch")
 
-# ====================== FULL X-RAY ======================
+# ====================== 7. LINEUP X-RAY ======================
 if lineups_df is not None:
     with tabs[6]:
         st.subheader("📋 Lineup X-Ray")
-
-        # Exposures
         exposures = [name for pos in pos_cols for name in lineups_df.get(f"{pos}_Name", pd.Series()).dropna()]
         exp_df = pd.Series(exposures).value_counts().reset_index()
         exp_df.columns = ["Player", "Count"]
@@ -198,93 +343,4 @@ if lineups_df is not None:
         st.subheader("Exposures")
         st.dataframe(exp_df, width="stretch")
 
-        # Lineup Cards
-        st.subheader("Lineup Cards")
-        lineup_num = st.selectbox("Select Lineup", range(len(lineups_df)))
-        row = lineups_df.iloc[lineup_num]
-
-        teams = [name_to_team.get(row[f"{pos}_Name"].lower(), "UNK") for pos in pos_cols if f"{pos}_Name" in row and pd.notna(row[f"{pos}_Name"])]
-        stack_counter = Counter([t for t in teams if t != "UNK"])
-        stack_label = " • ".join([f"{team} {cnt}" for team, cnt in sorted(stack_counter.items(), key=lambda x: -x[1])])
-        st.markdown(f"**Stack:** {stack_label}")
-
-        c = st.columns([1, 4, 1.5, 1.5, 1.5, 1.2])
-        c[0].markdown("**Pos**")
-        c[1].markdown("**Player**")
-        c[2].markdown("**Proj**")
-        c[3].markdown("**Value**")
-        c[4].markdown("**Own**")
-        for pos in pos_cols:
-            name_col = f"{pos}_Name"
-            if name_col in row and pd.notna(row[name_col]):
-                name = row[name_col]
-                clean = name.lower()
-                info = name_to_info.get(clean, {})
-                c[0].markdown(f"**{pos}**")
-                c[1].markdown(f"**{name}**")
-                c[2].write(f"{info.get('Projection',0):.1f}")
-                c[3].write(f"{info.get('Value_per_k',0):.2f}")
-                c[4].write(f"{info.get('Ownership',0):.1f}%")
-
-        # Player Drill-Down with Teammates
-        st.subheader("Player Drill-Down")
-        search_player = st.text_input("Search player name")
-        if search_player:
-            search_lower = search_player.lower()
-            matching = [n for n in name_to_info.keys() if search_lower in n]
-            if matching:
-                clean_name = matching[0]
-                display_name = name_to_info[clean_name]["Display"]
-                info = name_to_info[clean_name]
-
-                mask = pd.Series(False, index=lineups_df.index)
-                for pos in pos_cols:
-                    col = f"{pos}_Name"
-                    if col in lineups_df.columns:
-                        mask |= (lineups_df[col] == display_name)
-                lineup_count = mask.sum()
-
-                st.success(f"**{display_name}** — In **{lineup_count}** lineups | Proj {info['Projection']:.1f} | Value/k {info['Value_per_k']:.2f} | Own {info['Ownership']:.1f}%")
-
-                st.subheader("Most Common Teammates")
-                teammate_lineups = lineups_df[mask]
-                teammates = []
-                for pos in pos_cols:
-                    col = f"{pos}_Name"
-                    if col in teammate_lineups.columns:
-                        for tm in teammate_lineups[col].dropna():
-                            if tm != display_name:
-                                teammates.append(tm)
-                if teammates:
-                    tm_df = pd.Series(teammates).value_counts().head(10).reset_index()
-                    tm_df.columns = ["Teammate", "Count"]
-                    fig = px.bar(tm_df, x="Teammate", y="Count", title="Most Common Teammates")
-                    st.plotly_chart(fig, use_container_width=True)
-
-        # Traps
-        st.subheader("Traps")
-        traps = []
-        for clean_name, info in name_to_info.items():
-            exp_row = exp_df[exp_df["Player"] == info["Display"]]
-            exp_pct = exp_row["Exposure %"].iloc[0] if not exp_row.empty else 0
-            gap = exp_pct - info.get("Ownership", 0)
-            if exp_pct > 20 and (info.get("Value_per_k", 0) < 4.8 or gap > 10):
-                traps.append({"Player": info["Display"], "Value/k": info.get("Value_per_k", 0), "Gap %": round(gap,1), "Exposure %": round(exp_pct,1)})
-        if traps:
-            st.dataframe(pd.DataFrame(traps).sort_values("Gap %", ascending=False), width="stretch")
-        else:
-            st.success("No major traps detected")
-
-        # Stack Analysis
-        st.subheader("Stack Analysis")
-        if len(lineups_df) > 0:
-            stack_labels = []
-            for _, row in lineups_df.iterrows():
-                teams = [name_to_team.get(row[f"{pos}_Name"].lower(), "UNK") for pos in pos_cols if f"{pos}_Name" in row and pd.notna(row[f"{pos}_Name"])]
-                counter = Counter([t for t in teams if t != "UNK"])
-                parts = [f"{team} {cnt}" for team, cnt in sorted(counter.items(), key=lambda x: -x[1])]
-                stack_labels.append(" • ".join(parts))
-            stack_series = pd.Series(stack_labels)
-            st.bar_chart(stack_series.value_counts().head(15))
-
-st.caption("DFS X-Ray Full v1.1 — All descriptions restored")
+st.caption("DFS X-Ray Full v2.1 — Clickable player & team links fixed everywhere")
