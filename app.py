@@ -29,7 +29,7 @@ col1, col2 = st.columns(2)
 with col1:
     research_file = st.file_uploader("1. Research Station CSV (required)", type="csv")
 with col2:
-    lineups_file = st.file_uploader("2. Lineups CSV (optional — enables full X-Ray)", type="csv")
+    lineups_file = st.file_uploader("2. Lineups CSV (optional)", type="csv")
 
 if not research_file:
     st.stop()
@@ -59,11 +59,15 @@ def load_research(file):
     df["Pace (+/-)"] = df.get("Pace (+/-)", pd.Series([0] * len(df))).apply(clean_num)
     df["Ceiling"] = df.get("Ceiling", pd.Series([0] * len(df))).apply(clean_num)
     df["USG%"] = df.get("USG%", pd.Series([0] * len(df))).apply(clean_num)
+    df["Pace Team"] = df.get("Pace Team", pd.Series([0] * len(df))).apply(clean_num)
+    df["Pace Opp"] = df.get("Pace Opp", pd.Series([0] * len(df))).apply(clean_num)
 
     df["Team"] = df["Team"].astype(str).str.upper().str.strip()
     df["Value_per_k"] = (df["Proj"] / (df["Salary"] / 1000)).round(2)
     df["Points_per_min"] = (df["Proj"] / df["Minutes"]).round(2) if "Minutes" in df.columns and df["Minutes"].max() > 0 else 0.0
     df["Min_Trend"] = df.get("Minutes", pd.Series([0] * len(df))) - df.get("5gMin", pd.Series([0] * len(df)))
+
+    df["Game_Pace"] = df["Pace Team"] + df["Pace Opp"]
 
     return df
 
@@ -158,8 +162,27 @@ def clickable_team(team):
     url = team_url_map.get(team, "#")
     return f'<a href="{url}" target="_blank">{team}</a>'
 
+# ====================== BADGE FUNCTION ======================
+def get_badges(row, top_pace_teams):
+    badges = []
+    if row['Value_per_k'] >= 5.0: badges.append("🔥 High Value")
+    if row.get("Minutes", 0) >= 30: badges.append("⏱️ Strong Min")
+    if row.get("5gFP", 0) > row['Proj'] * 0.9: badges.append("📈 Hot Form")
+    if row.get("Proj Diff", 0) > 0: badges.append("🎯 GPP Edge")
+    if row.get("Dvp", 0) <= -5.0: badges.append("🛡️ Dream Matchup")
+    if row.get("Pace (+/-)", 0) >= 2.0: badges.append("⚡ Pace Booster")
+    if row.get("Rest", 0) >= 3: badges.append("🛌 Fresh Legs")
+    if row.get("DFSA Grade", 0) >= 70: badges.append("💎 Elite DFSA")
+    if row["Team"] in top_pace_teams:
+        badges.append("⚡ High Game Pace")
+    return badges
+
+# Identify the two highest combined-pace games
+pace_ranking = research_df.groupby("Team")["Game_Pace"].first().nlargest(2)
+top_pace_teams = pace_ranking.index.tolist()
+
 # ====================== TABS ======================
-tab_list = ["🔥 Hot Glance", "9K Studs", "🔀 Stacks", "⏱️ Minutes", "📈 Consistency", "⚡ Vegas & Pace"]
+tab_list = ["🔥 Hot Glance", "9K Studs", "🔀 Stacks", "⏱️ Minutes", "Player List"]
 if lineups_df is not None:
     tab_list.append("📋 Lineup X-Ray")
 
@@ -181,22 +204,11 @@ with tabs[0]:
         - **🛡️ Dream Matchup**: Dvp ≤ -5.0%  
         - **⚡ Pace Booster**: Pace (+/-) ≥ +2.0  
         - **🛌 Fresh Legs**: Rest ≥ 3 days  
-        - **💎 Elite DFSA**: DFSA Grade ≥ 70
+        - **💎 Elite DFSA**: DFSA Grade ≥ 70  
+        - **⚡ High Game Pace**: Player is in one of the two highest combined-pace games
         """)
 
-    def get_badges(row):
-        badges = []
-        if row['Value_per_k'] >= 5.0: badges.append("🔥 High Value")
-        if row.get("Minutes", 0) >= 30: badges.append("⏱️ Strong Min")
-        if row.get("5gFP", 0) > row['Proj'] * 0.9: badges.append("📈 Hot Form")
-        if row.get("Proj Diff", 0) > 0: badges.append("🎯 GPP Edge")
-        if row.get("Dvp", 0) <= -5.0: badges.append("🛡️ Dream Matchup")
-        if row.get("Pace (+/-)", 0) >= 2.0: badges.append("⚡ Pace Booster")
-        if row.get("Rest", 0) >= 3: badges.append("🛌 Fresh Legs")
-        if row.get("DFSA Grade", 0) >= 70: badges.append("💎 Elite DFSA")
-        return badges
-
-    research_df["badges"] = research_df.apply(get_badges, axis=1)
+    research_df["badges"] = research_df.apply(lambda row: get_badges(row, top_pace_teams), axis=1)
     research_df["badge_count"] = research_df["badges"].apply(len)
 
     mask = (
@@ -233,10 +245,12 @@ with tabs[1]:
         - **🛡️ Dream Matchup**: Dvp ≤ -5.0%  
         - **⚡ Pace Booster**: Pace (+/-) ≥ +2.0  
         - **🛌 Fresh Legs**: Rest ≥ 3 days  
-        - **💎 Elite DFSA**: DFSA Grade ≥ 70
+        - **💎 Elite DFSA**: DFSA Grade ≥ 70  
+        - **⚡ High Game Pace**: Player is in one of the two highest combined-pace games
         """)
 
     studs = research_df[research_df["Salary"] >= 9000].copy()
+    studs["badges"] = studs.apply(lambda row: get_badges(row, top_pace_teams), axis=1)
 
     sort_options = {
         "Projection (high to low)": "Proj",
@@ -258,24 +272,13 @@ with tabs[1]:
                 st.metric("Value/k", f"{p['Value_per_k']:.2f}")
                 st.metric("Own", f"{p['Ownership']:.1f}%")
                 st.caption(f"Dvp: {p.get('Dvp', 0):.1f}%")
-
-                badges = []
-                if p['Value_per_k'] >= 5.0: badges.append("🔥 High Value")
-                if p.get("Minutes", 0) >= 32: badges.append("⏱️ Strong Min")
-                if p.get("5gFP", 0) > p['Proj'] * 0.9: badges.append("📈 Hot Form")
-                if p.get("Proj Diff", 0) > 0: badges.append("🎯 GPP Edge")
-                if p.get("Dvp", 0) <= -5.0: badges.append("🛡️ Dream Matchup")
-                if p.get("Pace (+/-)", 0) >= 2.0: badges.append("⚡ Pace Booster")
-                if p.get("Rest", 0) >= 3: badges.append("🛌 Fresh Legs")
-                if p.get("DFSA Grade", 0) >= 70: badges.append("💎 Elite DFSA")
-
-                for b in badges:
+                for b in p["badges"]:
                     st.markdown(f"<span style='color:#44FF88'>{b}</span>", unsafe_allow_html=True)
 
 # ====================== 3. STACKS ======================
 with tabs[2]:
     st.subheader("🔀 Recommended Core Stacks")
-    st.caption("**Smart logic**:\n1. Most players in top 10 ownership\n2. Tie → highest game total\n3. Head-to-head → favorite")
+    st.caption("Only the #1 recommended stack shows players. Other teams show count only.")
 
     top_owned = research_df.nlargest(10, "Ownership")
     team_stats = top_owned.groupby("Team").agg(
@@ -290,49 +293,64 @@ with tabs[2]:
         ascending=[False, False, False]
     )
 
-    for _, row in team_stats.head(4).iterrows():
+    top_row = team_stats.iloc[0]
+    team = top_row["Team"]
+    count = int(top_row["Player_Count"])
+    players = top_owned[top_owned["Team"] == team]["Name"].tolist()
+
+    st.markdown(f"**#1 Recommended 3-Stack → {clickable_team(team)}** ({count} players in top 10 owned)", unsafe_allow_html=True)
+    clickable_players = [clickable_name(p) for p in players[:8]]
+    st.write(" → " + ", ".join(clickable_players), unsafe_allow_html=True)
+    st.write("---")
+
+    for _, row in team_stats.iloc[1:4].iterrows():
         team = row["Team"]
         count = int(row["Player_Count"])
-        players = top_owned[top_owned["Team"] == team]["Name"].tolist()
-
-        if _ == 0:
-            st.markdown(f"**#1 Recommended 3-Stack → {clickable_team(team)}** ({count} players in top 10 owned)", unsafe_allow_html=True)
-        else:
-            st.markdown(f"**{clickable_team(team)}** — {count} players in top 10 ownership", unsafe_allow_html=True)
-
-        clickable_players = [clickable_name(p) for p in players[:8]]
-        st.write(" → " + ", ".join(clickable_players), unsafe_allow_html=True)
+        st.markdown(f"**{clickable_team(team)}** — {count} players in top 10 ownership", unsafe_allow_html=True)
         st.write("---")
 
 # ====================== 4. MINUTES ======================
 with tabs[3]:
     st.subheader("⏱️ Minutes & Usage")
-    st.caption("**Points per Minute** = scoring efficiency when on the floor.\n**Min_Trend** = Projected minutes - 5-game average.")
-    st.dataframe(research_df.nlargest(12, "Points_per_min")[["Name", "Team", "Minutes", "Points_per_min", "Proj", "Ownership"]], width="stretch")
-    st.dataframe(research_df.nlargest(12, "Minutes")[["Name", "Team", "Minutes", "5gMin", "Min_Trend"]], width="stretch")
 
-# ====================== 5. CONSISTENCY ======================
+    st.markdown("**Top 12 Players by Projected Minutes**")
+    min_df = research_df.nlargest(12, "Minutes")[["Name", "Team", "Minutes"]].copy()
+    fig_min = px.bar(min_df, y="Name", x="Minutes", orientation='h', text="Minutes", color="Minutes", color_continuous_scale="Blues")
+    fig_min.update_layout(yaxis={'categoryorder':'total ascending'}, height=500)
+    st.plotly_chart(fig_min, use_container_width=True)
+
+    st.markdown("**Top 12 Players by Points per Minute**")
+    ppm_df = research_df.nlargest(12, "Points_per_min")[["Name", "Team", "Points_per_min", "Proj"]].copy()
+    fig_ppm = px.bar(ppm_df, y="Name", x="Points_per_min", orientation='h', text="Points_per_min", color="Points_per_min", color_continuous_scale="Greens")
+    fig_ppm.update_layout(yaxis={'categoryorder':'total ascending'}, height=500)
+    st.plotly_chart(fig_ppm, use_container_width=True)
+
+# ====================== 5. PLAYER LIST ======================
 with tabs[4]:
-    st.subheader("📈 Consistency & Recent Form + GPP")
-    fig = px.scatter(research_df, x="5gFP", y="Proj", color="Ownership", size="Value_per_k", hover_name="Name")
-    st.plotly_chart(fig, use_container_width=True)
-    st.dataframe(research_df.nlargest(12, "5gFP")[["Name", "Team", "Proj", "Value_per_k", "Ownership", "5gFP"]], width="stretch")
+    st.subheader("Player List")
+    st.caption("Full slate • Sorted by total badges (highest first)")
 
-    st.subheader("GPP Insights")
-    gpp = research_df.nlargest(12, "Proj Diff")[["Name", "Team", "Proj", "GPP Target", "7x%", "Proj Diff", "Ownership"]]
-    st.dataframe(gpp, width="stretch")
+    research_df["badges"] = research_df.apply(lambda row: get_badges(row, top_pace_teams), axis=1)
+    research_df["Badge Count"] = research_df["badges"].apply(len)
 
-# ====================== 6. VEGAS & PACE ======================
-with tabs[5]:
-    st.subheader("⚡ Vegas & Pace Highlights")
-    games = research_df[['Team', 'Opp', 'Total O/U']].drop_duplicates().sort_values('Total O/U', ascending=False)
-    st.dataframe(games.head(6), width="stretch")
-    pace_teams = research_df[['Team', 'Pace Team']].drop_duplicates().sort_values('Pace Team', ascending=False).head(8)
-    st.dataframe(pace_teams, width="stretch")
+    player_list = research_df[["Name", "Salary", "Team", "Opp", "Badge Count"]].copy()
+    player_list = player_list.sort_values("Badge Count", ascending=False)
 
-# ====================== 7. LINEUP X-RAY ======================
+    # Build HTML table with clickable links
+    player_list["Name"] = player_list["Name"].apply(clickable_name)
+    player_list["Team"] = player_list["Team"].apply(clickable_team)
+
+    html_table = player_list.to_html(index=False, escape=False)
+    # Add some basic styling
+    html_table = html_table.replace('<table>', '<table style="width:100%; border-collapse:collapse;">')
+    html_table = html_table.replace('<th>', '<th style="text-align:left; padding:8px; border-bottom:2px solid #ddd;">')
+    html_table = html_table.replace('<td>', '<td style="padding:8px; border-bottom:1px solid #ddd;">')
+
+    st.markdown(html_table, unsafe_allow_html=True)
+
+# ====================== 6. LINEUP X-RAY ======================
 if lineups_df is not None:
-    with tabs[6]:
+    with tabs[5]:
         st.subheader("📋 Lineup X-Ray")
         exposures = [name for pos in pos_cols for name in lineups_df.get(f"{pos}_Name", pd.Series()).dropna()]
         exp_df = pd.Series(exposures).value_counts().reset_index()
@@ -343,4 +361,4 @@ if lineups_df is not None:
         st.subheader("Exposures")
         st.dataframe(exp_df, width="stretch")
 
-st.caption("DFS X-Ray Full v2.1 — Clickable player & team links fixed everywhere")
+st.caption("DFS X-Ray Full v2.8 — Player List now renders proper clickable links")
