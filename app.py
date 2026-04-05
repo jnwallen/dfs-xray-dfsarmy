@@ -120,7 +120,7 @@ if lineups_file:
 else:
     st.success(f"Research: **{len(research_df)}** players (Upload lineups for full X-Ray)")
 
-# ====================== CLICKABLE LINK HELPERS ======================
+# ====================== CLICKABLE HELPERS ======================
 team_url_map = {
     "ATL": "https://www.espn.com/nba/team/_/name/atl/atlanta-hawks",
     "BOS": "https://www.espn.com/nba/team/_/name/bos/boston-celtics",
@@ -154,6 +154,16 @@ team_url_map = {
     "WAS": "https://www.espn.com/nba/team/_/name/was/washington-wizards",
 }
 
+# StatMuse requires exact uppercase 3-letter codes
+statmuse_team_map = {
+    "ATL": "ATL", "BOS": "BOS", "BKN": "BKN", "CHA": "CHA", "CHI": "CHI",
+    "CLE": "CLE", "DAL": "DAL", "DEN": "DEN", "DET": "DET", "GS": "GS",
+    "HOU": "HOU", "IND": "IND", "LAC": "LAC", "LAL": "LAL", "MEM": "MEM",
+    "MIA": "MIA", "MIL": "MIL", "MIN": "MIN", "NO": "NO", "NYK": "NYK",
+    "OKC": "OKC", "ORL": "ORL", "PHI": "PHI", "PHO": "PHX", "POR": "POR",
+    "SAC": "SAC", "SA": "SAS", "TOR": "TOR", "UTA": "UTA", "WAS": "WAS",
+}
+
 def clickable_name(name):
     url = f"https://www.espn.com/search/_/q/{urllib.parse.quote(name)}"
     return f'<a href="{url}" target="_blank">{name}</a>'
@@ -161,6 +171,11 @@ def clickable_name(name):
 def clickable_team(team):
     url = team_url_map.get(team, "#")
     return f'<a href="{url}" target="_blank">{team}</a>'
+
+def matchup_link(player, opp):
+    p = urllib.parse.quote(player.replace(" ", "-").lower())
+    o = statmuse_team_map.get(opp, opp).upper()
+    return f"https://www.statmuse.com/nba/ask/{p}-stats-vs-{o}-this-season"
 
 # ====================== BADGE FUNCTION ======================
 def get_badges(row, top_pace_teams):
@@ -226,6 +241,7 @@ with tabs[0]:
                 st.metric("Proj", f"{p['Proj']:.1f}")
                 st.metric("Value/k", f"{p['Value_per_k']:.2f}")
                 st.metric("Own", f"{p['Ownership']:.1f}%")
+                st.markdown(f'[📊 MuP History]({matchup_link(p["Name"], p["Opp"])})', unsafe_allow_html=True)
                 for b in p["badges"]:
                     st.markdown(f"<span style='color:#44FF88'>{b}</span>", unsafe_allow_html=True)
 
@@ -271,6 +287,7 @@ with tabs[1]:
                 st.metric("Proj", f"{p['Proj']:.1f}")
                 st.metric("Value/k", f"{p['Value_per_k']:.2f}")
                 st.metric("Own", f"{p['Ownership']:.1f}%")
+                st.markdown(f'[📊 MuP History]({matchup_link(p["Name"], p["Opp"])})', unsafe_allow_html=True)
                 st.caption(f"Dvp: {p.get('Dvp', 0):.1f}%")
                 for b in p["badges"]:
                     st.markdown(f"<span style='color:#44FF88'>{b}</span>", unsafe_allow_html=True)
@@ -333,15 +350,18 @@ with tabs[4]:
     research_df["badges"] = research_df.apply(lambda row: get_badges(row, top_pace_teams), axis=1)
     research_df["Badge Count"] = research_df["badges"].apply(len)
 
+    # Work with clean names for links
     player_list = research_df[["Name", "Salary", "Team", "Opp", "Badge Count"]].copy()
     player_list = player_list.sort_values("Badge Count", ascending=False)
 
-    # Build HTML table with clickable links
+    # Build MuP column first (using clean names)
+    player_list["MuP"] = player_list.apply(lambda row: f'<a href="{matchup_link(row["Name"], row["Opp"])}" target="_blank">📊 MuP History</a>', axis=1)
+
+    # Now apply clickable formatting for display
     player_list["Name"] = player_list["Name"].apply(clickable_name)
     player_list["Team"] = player_list["Team"].apply(clickable_team)
 
     html_table = player_list.to_html(index=False, escape=False)
-    # Add some basic styling
     html_table = html_table.replace('<table>', '<table style="width:100%; border-collapse:collapse;">')
     html_table = html_table.replace('<th>', '<th style="text-align:left; padding:8px; border-bottom:2px solid #ddd;">')
     html_table = html_table.replace('<td>', '<td style="padding:8px; border-bottom:1px solid #ddd;">')
@@ -361,4 +381,4 @@ if lineups_df is not None:
         st.subheader("Exposures")
         st.dataframe(exp_df, width="stretch")
 
-st.caption("DFS X-Ray Full v2.8 — Player List now renders proper clickable links")
+st.caption("DFS X-Ray Full v2.12 — MuP History links fixed in Player List + uppercase team codes")
